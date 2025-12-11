@@ -126,11 +126,12 @@ func Seed() error {
 		{Nome: "Infantil", Descricao: "Competição infantil", Ordem: 5},
 	}
 
-	for _, modalidade := range modalidades {
-		if err := DB.Create(&modalidade).Error; err != nil {
-			return fmt.Errorf("erro ao criar modalidade %s: %w", modalidade.Nome, err)
+	// Inserir modalidades UMA POR UMA para garantir que sejam commitadas
+	for i := range modalidades {
+		if err := DB.Create(&modalidades[i]).Error; err != nil {
+			return fmt.Errorf("erro ao criar modalidade %s: %w", modalidades[i].Nome, err)
 		}
-		logrus.Infof("  ✓ Modalidade criada: %s", modalidade.Nome)
+		logrus.Infof("  ✓ Modalidade criada: %s (ID: %s)", modalidades[i].Nome, modalidades[i].ID)
 	}
 
 	// Criar usuário admin padrão
@@ -163,12 +164,19 @@ func Seed() error {
 	if err := DB.Create(&edicaoAtual).Error; err != nil {
 		return fmt.Errorf("erro ao criar edição: %w", err)
 	}
-	logrus.Infof("  ✓ Edição criada: %s", edicaoAtual.Nome)
+	logrus.Infof("  ✓ Edição criada: %s (ID: %s)", edicaoAtual.Nome, edicaoAtual.ID)
 
-	// Associar todas as modalidades à edição
-	if err := DB.Model(&edicaoAtual).Association("Modalidades").Append(&modalidades); err != nil {
+	// IMPORTANTE: Recarregar as modalidades do banco para ter os IDs corretos
+	var modalidadesDB []models.Modalidade
+	if err := DB.Find(&modalidadesDB).Error; err != nil {
+		return fmt.Errorf("erro ao buscar modalidades: %w", err)
+	}
+
+	// Associar modalidades à edição usando o método correto
+	if err := DB.Model(&edicaoAtual).Association("Modalidades").Append(&modalidadesDB); err != nil {
 		return fmt.Errorf("erro ao associar modalidades: %w", err)
 	}
+	logrus.Infof("  ✓ Modalidades associadas à edição")
 
 	logrus.Info("✅ Seed concluído com sucesso!")
 	logrus.Info("============================================")
