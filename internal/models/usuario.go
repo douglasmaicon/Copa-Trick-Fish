@@ -54,3 +54,21 @@ func (u *Usuario) PodeAcessar() bool {
 	}
 	return true
 }
+
+// RegistrarAcesso atualiza o último acesso
+func (u *Usuario) RegistrarAcesso() {
+	now := time.Now()
+	u.UltimoAcesso = &now
+	u.TentativasLogin = 0 // resetar tentativas
+}
+
+// RegistrarFalhaLogin incrementa tentativas e bloqueia se necessário
+func (u *Usuario) RegistrarFalhaLogin() {
+	u.TentativasLogin++
+
+	// Bloquear após 5 tentativas por 15 minutos
+	if u.TentativasLogin >= 5 {
+		bloqueio := time.Now().Add(15 * time.Minute)
+		u.BloqueadoAte = &bloqueio
+	}
+}

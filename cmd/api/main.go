@@ -12,6 +12,7 @@ import (
 	"github.com/douglasmaicon/Copa-Trick-Fish/internal/config"
 	"github.com/douglasmaicon/Copa-Trick-Fish/internal/database"
 	"github.com/douglasmaicon/Copa-Trick-Fish/internal/handlers"
+	"github.com/douglasmaicon/Copa-Trick-Fish/internal/middleware"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
@@ -171,88 +172,129 @@ func setupRoutes(router *gin.Engine) {
 			})
 		})
 
-		// TODO: Adicionar rotas de recursos aqui
-		// Exemplo:
-		// edicoes := api.Group("/edicoes")
-		// {
-		//     edicoes.GET("", handlers.ListarEdicoes)
-		//     edicoes.GET("/:id", handlers.BuscarEdicao)
-		// }
-		modalidades := api.Group("/modalidades")
+		// ============================================
+		// ROTAS PÚBLICAS (SEM AUTENTICAÇÃO)
+		// ============================================
+
+		// Autenticação
+		auth := api.Group("/auth")
 		{
-			modalidades.GET("", handlers.ListarModalidades)
+			auth.POST("/login/usuario", handlers.LoginUsuario)
+			auth.POST("/login/competidor", handlers.LoginCompetidor)
+			auth.POST("/refresh", handlers.RefreshToken)
 		}
 
-		// Edições
-		edicoes := api.Group("/edicoes")
+		// Modalidades (público)
+		api.GET("/modalidades", handlers.ListarModalidades)
+
+		// Edições (público - apenas leitura)
+		api.GET("/edicoes", handlers.ListarEdicoes)
+		api.GET("/edicoes/ativa", handlers.BuscarEdicaoAtiva)
+		api.GET("/edicoes/:id", handlers.BuscarEdicao)
+
+		// Etapas (público - apenas leitura)
+		api.GET("/etapas", handlers.ListarEtapas)
+		api.GET("/etapas/:id", handlers.BuscarEtapa)
+
+		// Rankings (público)
+		api.GET("/rankings", handlers.ListarRankings)
+		api.GET("/rankings/etapa/:id", handlers.BuscarRankingEtapa)
+
+		// ============================================
+		// ROTAS AUTENTICADAS (REQUER LOGIN)
+		// ============================================
+
+		cfg := config.AppConfig
+		autenticado := api.Group("")
+		autenticado.Use(middleware.AuthMiddleware(cfg))
 		{
-			edicoes.GET("", handlers.ListarEdicoes)
-			edicoes.GET("/ativa", handlers.BuscarEdicaoAtiva)
-			edicoes.GET("/:id", handlers.BuscarEdicao)
-			edicoes.POST("", handlers.CriarEdicao)
-			edicoes.PUT("/:id", handlers.AtualizarEdicao)
-			edicoes.DELETE("/:id", handlers.DeletarEdicao)
+			// Perfil do usuário logado
+			autenticado.GET("/perfil", handlers.MeuPerfil)
+
+			// Inscrições (competidores podem criar suas próprias)
+			autenticado.POST("/inscricoes", handlers.CriarInscricao)
+			autenticado.GET("/inscricoes/:id", handlers.BuscarInscricao)
+
+			// Capturas (competidores podem registrar)
+			autenticado.POST("/capturas", handlers.CriarCaptura)
+			autenticado.GET("/capturas/:id", handlers.BuscarCaptura)
 		}
 
-		// Etapas
-		etapas := api.Group("/etapas")
+		// ============================================
+		// ROTAS DE FISCAL (fiscal, organizador, admin)
+		// ============================================
+
+		fiscal := api.Group("/fiscal")
+		fiscal.Use(middleware.AuthMiddleware(cfg))
+		fiscal.Use(middleware.FiscalOnly())
 		{
-			etapas.GET("", handlers.ListarEtapas)
-			etapas.GET("/:id", handlers.BuscarEtapa)
-			etapas.POST("", handlers.CriarEtapa)
-			etapas.PUT("/:id", handlers.AtualizarEtapa)
-			etapas.DELETE("/:id", handlers.DeletarEtapa)
+			// Listar capturas para validação
+			fiscal.GET("/capturas", handlers.ListarCapturas)
+
+			// Validar e anular capturas
+			fiscal.PUT("/capturas/:id/validar", handlers.ValidarCaptura)
+			fiscal.PUT("/capturas/:id/anular", handlers.AnularCaptura)
+
+			// Listar inscrições
+			fiscal.GET("/inscricoes", handlers.ListarInscricoes)
+
+			// Devolução de régua
+			fiscal.POST("/inscricoes/:id/devolver-regua", handlers.DevolverRegua)
 		}
 
-		// Competidores
-		competidores := api.Group("/competidores")
+		// ============================================
+		// ROTAS DE ORGANIZADOR (organizador, admin)
+		// ============================================
+
+		organizador := api.Group("/organizador")
+		organizador.Use(middleware.AuthMiddleware(cfg))
+		organizador.Use(middleware.OrganizadorOnly())
 		{
-			competidores.GET("", handlers.ListarCompetidores)
-			competidores.GET("/:id", handlers.BuscarCompetidor)
-			competidores.POST("", handlers.CriarCompetidor)
-			competidores.PUT("/:id", handlers.AtualizarCompetidor)
-			competidores.POST("/:id/banir", handlers.BanirCompetidor)
-			competidores.POST("/:id/desbanir", handlers.DesbanirCompetidor)
+			// Gerenciar etapas
+			organizador.POST("/etapas", handlers.CriarEtapa)
+			organizador.PUT("/etapas/:id", handlers.AtualizarEtapa)
+			organizador.DELETE("/etapas/:id", handlers.DeletarEtapa)
+
+			// Gerenciar réguas
+			organizador.GET("/reguas", handlers.ListarReguas)
+			organizador.POST("/reguas/gerar", handlers.GerarReguas)
+			organizador.POST("/reguas/sortear", handlers.SortearReguas)
+			organizador.DELETE("/reguas/:id", handlers.DeletarRegua)
+
+			// Gerenciar inscrições
+			organizador.POST("/inscricoes/:id/confirmar-pagamento", handlers.ConfirmarPagamento)
+			organizador.POST("/inscricoes/:id/eliminar", handlers.EliminarCompetidor)
+
+			// Gerenciar rankings
+			organizador.POST("/rankings/etapa/:id/gerar", handlers.GerarRanking)
+			organizador.DELETE("/rankings/:id", handlers.DeletarRanking)
+
+			// Gerenciar competidores
+			organizador.GET("/competidores", handlers.ListarCompetidores)
+			organizador.GET("/competidores/:id", handlers.BuscarCompetidor)
+			organizador.PUT("/competidores/:id", handlers.AtualizarCompetidor)
+			organizador.POST("/competidores/:id/banir", handlers.BanirCompetidor)
+			organizador.POST("/competidores/:id/desbanir", handlers.DesbanirCompetidor)
 		}
 
-		// Inscrições
-		inscricoes := api.Group("/inscricoes")
-		{
-			inscricoes.GET("", handlers.ListarInscricoes)
-			inscricoes.GET("/:id", handlers.BuscarInscricao)
-			inscricoes.POST("", handlers.CriarInscricao)
-			inscricoes.POST("/:id/confirmar-pagamento", handlers.ConfirmarPagamento)
-			inscricoes.POST("/:id/eliminar", handlers.EliminarCompetidor)
-			inscricoes.POST("/:id/devolver-regua", handlers.DevolverRegua)
-		}
+		// ============================================
+		// ROTAS DE ADMIN (apenas admin)
+		// ============================================
 
-		// Réguas
-		reguas := api.Group("/reguas")
+		admin := api.Group("/admin")
+		admin.Use(middleware.AuthMiddleware(cfg))
+		admin.Use(middleware.AdminOnly())
 		{
-			reguas.GET("", handlers.ListarReguas)
-			reguas.POST("/gerar", handlers.GerarReguas)
-			reguas.POST("/sortear", handlers.SortearReguas)
-			reguas.DELETE("/:id", handlers.DeletarRegua)
-		}
+			// Gerenciar edições
+			admin.POST("/edicoes", handlers.CriarEdicao)
+			admin.PUT("/edicoes/:id", handlers.AtualizarEdicao)
+			admin.DELETE("/edicoes/:id", handlers.DeletarEdicao)
 
-		// Capturas
-		capturas := api.Group("/capturas")
-		{
-			capturas.GET("", handlers.ListarCapturas)
-			capturas.GET("/:id", handlers.BuscarCaptura)
-			capturas.POST("", handlers.CriarCaptura)
-			capturas.PUT("/:id/validar", handlers.ValidarCaptura)
-			capturas.PUT("/:id/anular", handlers.AnularCaptura)
-			capturas.DELETE("/:id", handlers.DeletarCaptura)
-		}
+			// Registro público de competidores
+			admin.POST("/competidores", handlers.CriarCompetidor)
 
-		// Rankings
-		rankings := api.Group("/rankings")
-		{
-			rankings.GET("", handlers.ListarRankings)
-			rankings.GET("/etapa/:id", handlers.BuscarRankingEtapa)
-			rankings.POST("/etapa/:id/gerar", handlers.GerarRanking)
-			rankings.DELETE("/:id", handlers.DeletarRanking)
+			// Deletar capturas
+			admin.DELETE("/capturas/:id", handlers.DeletarCaptura)
 		}
 	}
 
